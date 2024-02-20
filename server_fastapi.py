@@ -73,9 +73,10 @@ if __name__ == "__main__":
 
     if args.cpu:
         device = "cpu"
+        print("cpu")
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-
+        print("gpu")
     model_dir = args.dir
     model_holder = ModelHolder(model_dir, device)
     if len(model_holder.model_names) == 0:
@@ -179,10 +180,13 @@ if __name__ == "__main__":
             style_weight=style_weight,
         )
         logger.success("Audio data generated and sent successfully")
+        wavfile.write("audioFiles/created.wav", rate=44100, data=audio)
+        
+        """
         with BytesIO() as wavContent:
             wavfile.write(wavContent, sr, audio)
             return Response(content=wavContent.getvalue(), media_type="audio/wav")
-
+        """
     @app.get("/models/info")
     def get_loaded_models_info():
         """ロードされたモデル情報の取得"""
