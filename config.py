@@ -238,6 +238,7 @@ class Config:
             )
             # sys.exit(0)
         with open(file=config_path, mode="r", encoding="utf-8") as file:
+            print("config_path:, ", config_path)
             yaml_config: Dict[str, any] = yaml.safe_load(file.read())
             model_name: str = yaml_config["model_name"]
             self.model_name: str = model_name
@@ -247,6 +248,7 @@ class Config:
                 dataset_path = os.path.join(path_config["dataset_root"], model_name)
             self.dataset_path: str = dataset_path
             self.assets_root: str = path_config["assets_root"]
+            print("path_config: ", path_config)
             self.out_dir = os.path.join(self.assets_root, model_name)
             self.resample_config: Resample_config = Resample_config.from_dict(
                 dataset_path, yaml_config["resample"]

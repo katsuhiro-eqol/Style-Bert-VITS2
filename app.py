@@ -127,6 +127,7 @@ def tts_fn(
         norm_text = text_normalize(text)
         kata_tone = g2kata_tone(norm_text)
         kata_tone_json_str = json.dumps(kata_tone, ensure_ascii=False)
+        print(kata_tone_json_str)
     elif tone is None:
         kata_tone_json_str = ""
     message = f"Success, time: {duration} seconds."

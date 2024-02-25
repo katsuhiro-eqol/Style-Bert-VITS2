@@ -4,9 +4,11 @@ API server for TTS
 import argparse
 import os
 import sys
+import json
 from io import BytesIO
 from typing import Dict, Optional, Union
 from urllib.parse import unquote
+import pyopenjtalk
 
 import GPUtil
 import psutil
@@ -16,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from scipy.io import wavfile
+from google.cloud import storage
 
 from common.constants import (
     DEFAULT_ASSIST_TEXT_WEIGHT,
@@ -32,9 +35,12 @@ from common.constants import (
 from common.log import logger
 from common.tts_model import Model, ModelHolder
 from config import config
+from text.japanese import g2kata_tone, kata_tone2phone_tone, text_normalize
 
 ln = config.server_config.language
 
+characters = os.getenv("CHARACTERS", default="silva")
+port = int(os.getenv("PORT", default="80"))
 
 def raise_validation_error(msg: str, param: str):
     logger.warning(f"Validation error: {msg}")
@@ -43,10 +49,8 @@ def raise_validation_error(msg: str, param: str):
         detail=[dict(type="invalid_params", msg=msg, loc=["query", param])],
     )
 
-
 class AudioResponse(Response):
     media_type = "audio/wav"
-
 
 def load_models(model_holder: ModelHolder):
     model_holder.models = []
@@ -61,7 +65,6 @@ def load_models(model_holder: ModelHolder):
         )
         model.load_net_g()
         model_holder.models.append(model)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -78,14 +81,38 @@ if __name__ == "__main__":
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print("gpu")
     model_dir = args.dir
-    print("model_dir: ", model_dir)
+
+    characters_array = characters.split(",")
+    client = storage.Client.from_service_account_json(".env")
+    bucket = client.get_bucket("targetproject-394500.appspot.com")
+    dir_list = os.listdir("model_assets")
+    print(dir_list)
+    for character in characters_array:
+        if character in dir_list:
+            print("exist model")
+        else:
+            m_dir = "model_assets/" + character
+            os.mkdir(m_dir)
+        
+        model_path = "models/" + character + "/"
+        files = bucket.list_blobs(prefix=model_path)
+        file_names = [file.name for file in files if file.name != model_path]
+        for file in file_names:
+            filename = file.split("/")[-1]
+            save_path = "model_assets/" + character + "/" + filename
+            model_blob = bucket.blob(file)
+            model_blob.download_to_filename(save_path)
+
+
     model_holder = ModelHolder(model_dir, device)
+    """
     if len(model_holder.model_names) == 0:
         logger.error(f"Models not found in {model_dir}.")
         sys.exit(1)
-
+    """
     logger.info("Loading models...")
     load_models(model_holder)
+
     limit = config.server_config.limit
     app = FastAPI()
     allow_origins = config.server_config.origins
@@ -102,14 +129,15 @@ if __name__ == "__main__":
         )
     app.logger = logger
 
-    @app.get("/voice", response_class=AudioResponse)
+    #@app.get("/voice", response_class=AudioResponse)
+    @app.get("/voice")
     async def voice(
         request: Request,
         text: str = Query(..., min_length=1, max_length=limit, description=f"セリフ"),
         encoding: str = Query(None, description="textをURLデコードする(ex, `utf-8`)"),
         model_id: int = Query(0, description="モデルID。`GET /models/info`のkeyの値を指定ください"),
         speaker_name: str = Query(
-            None, description="話者名(speaker_idより優先)。esd.listの2列目の文字列を指定"
+            "silva", description="話者名(speaker_idより優先)。esd.listの2列目の文字列を指定"
         ),
         speaker_id: int = Query(
             0, description="話者ID。model_assets>[model]>config.json内のspk2idを確認"
@@ -139,6 +167,7 @@ if __name__ == "__main__":
         style: Optional[Union[int, str]] = Query(DEFAULT_STYLE, description="スタイル"),
         style_weight: float = Query(DEFAULT_STYLE_WEIGHT, description="スタイルの強さ"),
         reference_audio_path: Optional[str] = Query(None, description="スタイルを音声ファイルで行う"),
+        hash: str = Query("0123", description=f"音声ファイル名"),
     ):
         """Infer text to speech(テキストから感情付き音声を生成する)"""
         logger.info(
@@ -148,10 +177,11 @@ if __name__ == "__main__":
             raise_validation_error(f"model_id={model_id} not found", "model_id")
 
         model = model_holder.models[model_id]
+        print("speaker_name:", speaker_name)
+        """
         if speaker_name is None:
-            if speaker_id not in model.id2spk.keys():
-                raise_validation_error(
-                    f"speaker_id={speaker_id} not found", "speaker_id"
+            raise_validation_error(
+                    f"speaker not found"
                 )
         else:
             if speaker_name not in model.spk2id.keys():
@@ -159,6 +189,8 @@ if __name__ == "__main__":
                     f"speaker_name={speaker_name} not found", "speaker_name"
                 )
             speaker_id = model.spk2id[speaker_name]
+            print("speaker_id:", speaker_id)
+        """
         if style not in model.style2id.keys():
             raise_validation_error(f"style={style} not found", "style")
         if encoding is not None:
@@ -180,14 +212,21 @@ if __name__ == "__main__":
             style=style,
             style_weight=style_weight,
         )
+
+        p = pyopenjtalk.g2p(text, kana=True)
+
         logger.success("Audio data generated and sent successfully")
-        wavfile.write("audioFiles/created.wav", rate=44100, data=audio)
-        
-        """
-        with BytesIO() as wavContent:
-            wavfile.write(wavContent, sr, audio)
-            return Response(content=wavContent.getvalue(), media_type="audio/wav")
-        """
+        audioFile = hash + ".wav"
+        audioPath = "audioFiles/" + audioFile
+        wavfile.write(audioPath, rate=44100, data=audio)
+        is_file = os.path.isfile(audioPath)
+        if is_file:
+            directory = "sbv_audio/" + speaker_name + "/" + audioFile
+            blob = bucket.blob(directory)
+            blob.upload_from_filename(audioPath)
+            #os.remove(audioPath)
+        return {"wav": audioFile, "pronunciation": p}
+    
     @app.get("/models/info")
     def get_loaded_models_info():
         """ロードされたモデル情報の取得"""
