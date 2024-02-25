@@ -4,9 +4,7 @@ FROM python:3.11-slim
 # Git LFSのインストール
 RUN apt-get update && \
     apt-get install -y git-lfs && \
-    git lfs install && \
-    apt-get install -y python3-dev && \
-    pip install psutil --verbose
+    git lfs install
 
 # リポジトリをクローン
 RUN git clone https://github.com/litagin02/Style-Bert-VITS2.git

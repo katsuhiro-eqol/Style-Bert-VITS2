@@ -118,6 +118,7 @@ class Model:
                 reference_audio_path, style_weight
             )
         if not line_split:
+            logger.info(f"audio synth")
             with torch.no_grad():
                 audio = infer(
                     text=text,
@@ -161,6 +162,7 @@ class Model:
                     if i != len(texts) - 1:
                         audios.append(np.zeros(int(44100 * split_interval)))
                 audio = np.concatenate(audios)
+                logger.info(f"audio synthized")
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 audio = convert_to_16_bit_wav(audio)
